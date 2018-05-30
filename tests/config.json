@@ -1,0 +1,9 @@
+{
+    "user": "postgres",
+    "database": "pgorm_test",
+    "password": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "max": 10,
+    "idleTimeoutMillis": 30000
+}
