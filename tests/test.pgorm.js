@@ -92,7 +92,7 @@ describe('test mapper', function () {
         pgo.registerModel(Blog, moduleName)
         pgo.registerModel(Post, moduleName)
 
-        await pgo.init(true)
+        await pgo.init(false)
 
         return seedData()
     });

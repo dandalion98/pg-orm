@@ -371,7 +371,7 @@ class Query {
         }
 
         if (this.modifiers.limit) {
-            query+= `LIMIT ${this.modifiers.limit} `
+            query+= ` LIMIT ${this.modifiers.limit} `
         }
 
         if (isUpdate) {
@@ -536,6 +536,7 @@ function getCreateColumnQuery(modelClass, name, def) {
         "integer": "integer",
         "foreignKey": "integer",
         "datetime": "TIMESTAMPTZ",
+        "date": "date",
         "decimal":"decimal"
     }
 
@@ -573,6 +574,12 @@ function getCreateColumnQuery(modelClass, name, def) {
 
     if ("foreignKey" == def.type) {
         var targetModule=def.targetModule || modelClass.moduleName
+
+        if (!modelNameMap[def.target]) {
+            console.dir(def)
+            log.error("Can't find model for foreign key:"+def.target)
+        }
+
         let targetTableName = modelNameMap[def.target].tableName
         let deleteSpec= (def.deleteCascade) ? " ON DELETE CASCADE" : " ON DELETE SET NULL"
         let constraint=`alter table ${modelClass.tableName} ADD CONSTRAINT ${name}_fk FOREIGN KEY ("${name}") REFERENCES ${targetTableName} ${deleteSpec} DEFERRABLE INITIALLY DEFERRED`
@@ -927,7 +934,7 @@ module.exports.registerModel = function(modelClass, moduleName){
     modelClass.columnDefinitions[column]=def
     if (def.type=="foreignKey") {
         modelClass.foreignKeys.push(column)
-    } else if (def.type == "datetime") {
+    } else if (def.type == "datetime" || def.type == "date") {
         modelClass.timeKeys.push(column)
     }
 
@@ -961,19 +968,26 @@ module.exports.setConfig = async function (config) {
     console.dir(gConfig)
 }
 
-module.exports.init = async function (isTest) {  
+module.exports.init = async function (loadModels) {  
 log.info(`init db`)  
     log.info("creating pg pool");
     console.dir(gConfig)
 
     pool = new pg.Pool(gConfig)
 
-    if (!isTest) {
+    if (loadModels) {
     loadModels()
     }
 
   return createTables()
 };
+
+module.exports.truncateAll = async function () {
+    for (let model of models) {
+        log.info(`truncating: ` + model.tableName)
+        await model.objects.truncate()
+    }
+}
 
 module.exports.dropdb = async function () {        
   log.info(`dropping database`)
