@@ -693,7 +693,7 @@ function loadModels() {
   log.info("finish loading models")
 };
 
-async function updateModelInstances(spec,data, transactionClient){
+async function updateModelInstances(spec, data, transactionClient) {
     if (spec.constructor === Array) {
         log.info("converting spec to ids")
         let v = []
@@ -705,7 +705,7 @@ async function updateModelInstances(spec,data, transactionClient){
 
     let q = new Query(spec)
     let [query, values] = q.getUpdateQueryAndValues(this, data)
-    var result=await querySimple(query,values,transactionClient)
+    var result = await querySimple(query, values, transactionClient)
     return true
 }    
 
@@ -725,6 +725,33 @@ async function aggregateModelInstances(agg, queryOrSpec, transactionClient) {
     Object.assign(t, agg)
 
     return filterModelInstances.call(this, queryOrSpec, transactionClient)    
+}
+
+/*
+ * Batch create/update multiple model instances.
+ * Create multiple new instances in 1 query; still need to update
+ * separately
+ */
+async function batchSaveModelInstances(instances, transactionClient) {
+    log.info("batch saving")
+    let existingInstances = []
+    let newInstances = []
+
+    for (let instance of instances) {
+        if (!instance.id) {
+            newInstances.push(instance)
+        } else {
+            existingInstances.push(instance)
+        }
+    }
+
+    log.info("new instances: " + newInstances.length)
+    console.dir(newInstances)
+    await createModelInstances.call(this, newInstances, transactionClient)
+
+    for (let existing of existingInstances) {
+        await existing.save(transactionClient)
+    }
 }
 
 async function filterModelInstances(spec,transactionClient){
@@ -812,24 +839,23 @@ function convertModel(modelClass,entries,isSingle) {
     return entries
 }
 
-// TODO: optimize if entries are already model type
-async function createModelInstances(rawEntries, transactionClient){
-    log.info(`dd3 creating model instances of type ${this.tableName}: tx=`+ transactionClient)
-    var isSingle=false
+async function createModelInstances(rawEntries, transactionClient) {
+    log.info(`dd3 creating model instances of type ${this.tableName}: tx=` + transactionClient)
+    var isSingle = false
 
-    var keywords=["ignoreConflict","updateConflict"]
-    var keyValues={}
+    var keywords = ["ignoreConflict", "updateConflict"]
+    var keyValues = {}
 
     if (!Array.isArray(rawEntries)) {
-        isSingle=true
+        isSingle = true
 
         for (var key in rawEntries) {
             if (keywords.includes(key)) {
-                keyValues[key]=rawEntries[key]
+                keyValues[key] = rawEntries[key]
             }
         }
 
-        rawEntries=[rawEntries]
+        rawEntries = [rawEntries]
     }
 
     let entries = []
@@ -837,7 +863,7 @@ async function createModelInstances(rawEntries, transactionClient){
     // console.dir(rawEntries)
     for (let raw of rawEntries) {
         delete raw["id"]
-        if (! (raw instanceof Model)) {
+        if (!(raw instanceof Model)) {
             // log.info("dd3 convert model")
             entries.push(new this(raw))
         } else {
@@ -848,67 +874,67 @@ async function createModelInstances(rawEntries, transactionClient){
     }
 
     let queryColumnNames = null
-    var values=[]
+    var values = []
     for (var i = 0; i < entries.length; i++) {
-      var entry=entries[i]
-      var row=[]
-      let rowColumnNames = []
-      for (var j = 0; j < this.columns.length; j++) {
-        var column=this.columns[j]
-        var value = entry[column]
-      
-        if (value === undefined) {
-            if (this.columnDefinitions[column].default) {
-                value = this.columnDefinitions[column].default
-            } else {
-                continue
+        var entry = entries[i]
+        var row = []
+        let rowColumnNames = []
+        for (var j = 0; j < this.columns.length; j++) {
+            var column = this.columns[j]
+            var value = entry[column]
+
+            if (value === undefined) {
+                if (this.columnDefinitions[column].default !== undefined) {
+                    value = this.columnDefinitions[column].default
+                } else {
+                    value = null
+                }
             }
+
+            rowColumnNames.push(column)
+
+            if (value instanceof Model) {
+                value = value.id
+            }
+
+            row.push(value)
+        };
+
+        values.push(row)
+
+        // TODO: how to detect mismatch rows?
+        if (!queryColumnNames) {
+            queryColumnNames = rowColumnNames;
         }
-
-        rowColumnNames.push(column)
-
-          if (value instanceof Model) {            
-            value=value.id
-        }
-        
-        row.push(value)  
-      };
-
-      values.push(row)
-
-      // TODO: how to detect mismatch rows?
-      if (!queryColumnNames) {
-          queryColumnNames = rowColumnNames;
-      }
     };
     // console.dir(entries)
     // console.dir(values)
-    var queryColumns=[]
+    var queryColumns = []
     for (var i = 0; i < queryColumnNames.length; i++) {
         queryColumns.push(`"${queryColumnNames[i]}"`)
     }
-    queryColumns=queryColumns.join(",")
+    queryColumns = queryColumns.join(",")
 
-    let conflictQuery=""
+    let conflictQuery = ""
     if (keyValues.ignoreConflict) {
-        conflictQuery="ON CONFLICT DO NOTHING"
+        conflictQuery = "ON CONFLICT DO NOTHING"
     } else if (keyValues.updateConflict) {
-        conflictQuery="ON CONFLICT DO UPDATE"
+        conflictQuery = "ON CONFLICT DO UPDATE"
     }
-    var query=queryFormat(`INSERT INTO ${this.tableName} (${queryColumns}) VALUES %L ${conflictQuery} RETURNING id`, values)
+    var query = queryFormat(`INSERT INTO ${this.tableName} (${queryColumns}) VALUES %L ${conflictQuery} RETURNING id`, values)
 
-    var result=await querySimple(query,null,transactionClient)
+    var result = await querySimple(query, null, transactionClient)
     // log.info(" result=" + result)
     // console.dir(result.rows)
 
     for (var i = 0; i < result.rows.length; i++) {
-        let modelId=result.rows[i]
-        entries[i].id=modelId.id
+        let modelId = result.rows[i]
+        entries[i].id = modelId.id
         entries[i].flatten()
     }
 
     if (isSingle) {
-        entries=entries[0]
+        entries = entries[0]
     }
 
     return entries
@@ -947,6 +973,7 @@ module.exports.registerModel = function(modelClass, moduleName){
     modelClass.objects.get=getModelInstance.bind(modelClass)
     modelClass.objects.getRandom=getRandomModelInstance.bind(modelClass)
     modelClass.objects.filter=filterModelInstances.bind(modelClass)
+    modelClass.objects.save = batchSaveModelInstances.bind(modelClass)
     modelClass.objects.delete=deleteModelInstances.bind(modelClass)
     modelClass.objects.update=updateModelInstances.bind(modelClass)
     modelClass.objects.aggregate=aggregateModelInstances.bind(modelClass)
