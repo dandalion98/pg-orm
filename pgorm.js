@@ -237,8 +237,8 @@ class Query {
     }
 
     getUpdateQueryAndValues(modelClass, data) {
-        log.info("getUpdateQuery table="+modelClass.tableName + " data=")
-        console.dir(data)
+        // log.info("getUpdateQuery table="+modelClass.tableName + " data=")
+        // console.dir(data)
         var values = []
         var dataClauses = []
         var specClauses = []
@@ -264,14 +264,16 @@ class Query {
         }
         var dataQuery = dataClauses.join(",")
 
-        let [specQuery, specValues] = this.getQueryAndValues(modelClass.tableName, valueIndex, true)
+        let [specQuery, specValues] = this.getQueryAndValues(modelClass, valueIndex, true)
         values = values.concat(specValues)
 
         var query = `UPDATE ${modelClass.tableName} SET ${dataQuery} ${specQuery}`
         return [query, values]
     }
 
-    getQueryAndValues(tableName, valueIndex, isUpdate) {
+    getQueryAndValues(modelClass, valueIndex, isUpdate) {
+        let tableName = modelClass.tableName
+
         // log.info("getQueryAndValues:"+tableName)
         if (undefined===valueIndex) {
             valueIndex = 1
@@ -296,6 +298,22 @@ class Query {
         let operation = (this.type == "delete") ? "DELETE" :`${selectClause} ${tableName}.*`
         if (isUpdate) {
             operation = `SELECT ${tableName}.id`
+        }
+
+        if (this.modifiers.fkReturn) {
+            for (let ff of this.modifiers.fkReturn) {
+                let t = ff.split("__")
+                let foreignKey = t[0]
+                let fkFieldName = t[1]
+                var fkClassName = modelClass.columnDefinitions[foreignKey].target
+                let fkTableName = modelNameMap[fkClassName].tableName
+                if (!fkTableName) {
+                    console.dir(this.modifiers.fkReturn)
+                    throw new Error("failed to find fk table name")
+                }
+
+                operation += `,${fkTableName}.${fkFieldName}`
+            }
         }
 
         let textSearch = this.modifiers.textSearch
@@ -393,7 +411,7 @@ class Query {
 }
 
 async function querySimple(query,values,transactionClient){
-    queryLog.info(`running query simple:\n${query}\n${values}`)
+    // queryLog.info(`running query simple:\n${query}\n${values}`)
     const client = transactionClient || await pool.connect()
     try {
       var result= await client.query(query,values)
@@ -639,15 +657,14 @@ async function createTables() {
 
     let or = await tx(async client => {
         for (let model of models) {
-            log.info("ddx creating table for model="+model.tableName)
+            // log.info("ddx creating table for model="+model.tableName)
             let [mq, postConstraints, indices] = getCreateTableQuery(model)
             allPostConstraints.push(...postConstraints)
             allIndices.push(...indices)
 
-             log.info("ddx executing query:\n" + mq)
+            //  log.info("ddx executing query:\n" + mq)
              let res = await client.query(mq);
              // log.info("read")
-             log.info("ddx:" + res)
         };
 
         return null
@@ -655,7 +672,7 @@ async function createTables() {
 
     // apply foreign key references last until all tables have been created
     for (let postConstraint of allPostConstraints) {    
-        log.info(`creating constraint:\n${postConstraint}`)
+        // log.info(`creating constraint:\n${postConstraint}`)
         try {
             await querySimple(postConstraint)    
         } catch (error) {
@@ -733,7 +750,6 @@ async function aggregateModelInstances(agg, queryOrSpec, transactionClient) {
  * separately
  */
 async function batchSaveModelInstances(instances, transactionClient) {
-    log.info("batch saving")
     let existingInstances = []
     let newInstances = []
 
@@ -745,9 +761,9 @@ async function batchSaveModelInstances(instances, transactionClient) {
         }
     }
 
-    log.info("new instances: " + newInstances.length)
-    console.dir(newInstances)
-    await createModelInstances.call(this, newInstances, transactionClient)
+    if (newInstances.length > 0) {
+        await createModelInstances.call(this, newInstances, transactionClient)
+    }
 
     for (let existing of existingInstances) {
         await existing.save(transactionClient)
@@ -755,7 +771,7 @@ async function batchSaveModelInstances(instances, transactionClient) {
 }
 
 async function filterModelInstances(spec,transactionClient){
-    var keywords=["limit","lock","groupBy","sum", "orderBy", "count", "textSearch"]
+    var keywords = ["fkReturn", "limit","lock","groupBy","sum", "orderBy", "count", "textSearch"]
     var keyValues={}
     var query 
 
@@ -773,7 +789,7 @@ async function filterModelInstances(spec,transactionClient){
         query.or(spec)
     }
 
-    let [q, values] = query.getQueryAndValues(this.tableName)
+    let [q, values] = query.getQueryAndValues(this)
     var result=await querySimple(q,values,transactionClient)
     // console.dir(query)
 
@@ -796,7 +812,7 @@ async function deleteModelInstances(spec,transactionClient){
 
     query.type="delete"
 
-    let [q, values] = query.getQueryAndValues(this.tableName)
+    let [q, values] = query.getQueryAndValues(this)
     var result=await querySimple(q,values,transactionClient)
     // console.dir(query)
     return null
@@ -840,7 +856,7 @@ function convertModel(modelClass,entries,isSingle) {
 }
 
 async function createModelInstances(rawEntries, transactionClient) {
-    log.info(`dd3 creating model instances of type ${this.tableName}: tx=` + transactionClient)
+    // log.info(`dd3 creating model instances of type ${this.tableName}: tx=` + transactionClient)
     var isSingle = false
 
     var keywords = ["ignoreConflict", "updateConflict"]
@@ -952,7 +968,7 @@ module.exports.registerModel = function(modelClass, moduleName){
     modelClass.timeKeys = []
   modelClass.columnDefinitions={}
 
-  console.dir(modelClass.structure)
+//   console.dir(modelClass.structure)
   for (var i = 0; i < modelClass.structure.length; i++) {
     var column=modelClass.structure[i][0]
     var def = modelClass.structure[i][1]
@@ -998,7 +1014,7 @@ module.exports.setConfig = async function (config) {
 module.exports.init = async function (loadModels) {  
 log.info(`init db`)  
     log.info("creating pg pool");
-    console.dir(gConfig)
+    // console.dir(gConfig)
 
     pool = new pg.Pool(gConfig)
 
