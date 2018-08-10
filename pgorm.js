@@ -394,10 +394,10 @@ class Query {
 
         if (isUpdate) {
             if (joinGraph.hasJoins()) {
-                log.info("has join; update")
+                // log.info("has join; update")
                 query = `WHERE "${tableName}"."id" IN (${query})`
             } else {
-                log.info("no join; update")
+                // log.info("no join; update")
                 query = `WHERE ${compound} `
             }
         }
